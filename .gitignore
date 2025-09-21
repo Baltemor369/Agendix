@@ -1,5 +1,6 @@
-#
+# sensitive data
 .secret
+config.py
 *.db
 
 # Byte-compiled / optimized / DLL files

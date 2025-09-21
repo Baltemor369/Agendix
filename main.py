@@ -1,17 +1,16 @@
 import sqlite3
 from pathlib import Path
 import requests
-import folium
-from folium.plugins import BeautifyIcon
 from ortools.constraint_solver import routing_enums_pb2, pywrapcp
 from dotenv import load_dotenv
 import os
+from config import *
 
 load_dotenv(dotenv_path=".secret")  # ou ".env.secret"
 DB_PATH     = os.getenv("DB_PATH")
 ORS_API_KEY = os.getenv("ORS_API_KEY")
-depot = os.getenv("depot")
-sample = os.getenv("sample")
+DEPOT = DEPOT1
+SAMPLE = SAMPLES
 
 def init_db(db_path=DB_PATH):
     # Supprime l'ancienne BDD et ne crée que 2 tables
@@ -79,25 +78,7 @@ def init_db(db_path=DB_PATH):
     print("* BDD initialisée (appointments + locations)")
 
 def insert_test_appointments(db_path=DB_PATH):
-    sample = [
-        ("M. Martin", "5", "Place d'Armes", "Metz", "57000", "Installation"),
-        ("Mme Dupont", "12", "Rue Sainte-Catherine", "Nancy", "54000", "Visite"),
-        ("Mme Marchand", "6", "Rue de la Chipotte", "Épinal", "88000", "Contrôle"),
-        ("M. Fabre", "14", "Rue des Quatre Églises", "Nancy", "54000", "Visite"),
-        ("Société Gamma", "11", "Rue de la Boudiou", "Épinal", "88000", "Maintenance"),
-        ("Mme Laurent", "10", "Rue du Général Ferrié", "Metz", "57070", "Visite"),
-        ("Mme Morel", "3", "Rue Saint-Dizier", "Nancy", "54000", "Installation"),
-        ("Entreprise Beta", "7", "Rue Charles III", "Nancy", "54000", "Maintenance"),
-        ("M. Dumas", "9", "Rue des Soupirs", "Épinal", "88000", "Installation"),
-        ("M. Bernard", "22", "Rue du XXe Corps", "Metz", "57000", "Installation"),
-        ("M. Petit", "20", "Rue Nationale", "Toul", "54200", "Contrôle"),
-        ("Société Alpha", "5", "Rue Saint-Pierre", "Metz", "57000", "Maintenance"),
-        ("Mme Legrand", "3", "Rue Jeanne d'Arc", "Verdun", "55100", "Visite"),
-        ("Mme Giraud", "2", "Rue Léopold Bourg", "Épinal", "88000", "Visite"),
-        ("M. Lefèvre", "18", "Rue de la Commanderie", "Nancy", "54000", "Contrôle"),
-        ("Mme Colin", "8", "Rue des Jardins", "Metz", "57050", "Contrôle"),
-        ("Société X", "1", "Rue du Pont", "Épinal", "88000", "Maintenance"),
-    ]
+    sample = SAMPLE
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
     for client, num, rue, ville, zipc, typ in sample:
@@ -158,7 +139,7 @@ def geocode_appointments(db_path=DB_PATH):
     print(f"* {done}/{len(appointments)} Géocodage ORS terminé et stocké dans 'locations'")
 
 def insert_depot(db_path=DB_PATH):
-    full = f"{depot.num} {depot.rue}, {depot.ville} {depot.zip_code}"
+    full = f"{DEPOT["num"]} {DEPOT["rue"]}, {DEPOT["ville"]} {DEPOT["zip_code"]}"
     lat, lon = geocode_address(full)  # ta fonction existante
 
     conn = sqlite3.connect(db_path)
@@ -166,10 +147,10 @@ def insert_depot(db_path=DB_PATH):
     c.execute("""
       INSERT INTO depots (nom, num, rue, ville, zip, lat, lon)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (depot.nom, depot.num, depot.rue, depot.ville, depot.zip_code, lat, lon))
+    """, (DEPOT["nom"], DEPOT["num"], DEPOT["rue"], DEPOT["ville"], DEPOT["zip_code"], lat, lon))
     conn.commit()
     conn.close()
-    print(f"* Dépôt '{depot.nom}' ajouté : {lat}, {lon}")
+    print(f"* Dépôt '{DEPOT["nom"]}' ajouté : {lat}, {lon}")
 
 from geopy.distance import geodesic
 
@@ -265,7 +246,7 @@ def plan_clusters(db_path=DB_PATH):
 
         # Définir le retour au dépôt
         routing.SetFixedCostOfAllVehicles(0)
-        routing.AddVariableMinimizedByFinalizer(transit_callback_index)
+        # routing.AddVariableMinimizedByFinalizer(transit_callback_index)
 
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
@@ -286,6 +267,9 @@ def plan_clusters(db_path=DB_PATH):
         sequence = 0
         while not routing.IsEnd(index):
             node = manager.IndexToNode(index)
+            if node == 0:  # Dépôt de départ, on le saute
+                index = solution.Value(routing.NextVar(index))
+                continue
             appt_id = locations[node][0]
             c.execute("""
                 INSERT INTO itineraries (cluster_id, appt_id, sequence)

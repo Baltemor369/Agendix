@@ -418,41 +418,41 @@ if __name__ == "__main__":
     print("Launching Agendix.. \n")
     
     # initialisation
-    # init_db()
-    # insert_depot()
+    init_db()
+    insert_depot()
 
     # insérer les données tests -> appointments
-    # insert_test_appointments()
+    insert_test_appointments()
 
     # convertion en lat,lon -> locations
-    # geocode_appointments()
+    geocode_appointments()
 
     # regroupement les points par proximité -> clusters
-    # conn = sqlite3.connect(DB_PATH)
-    # c = conn.cursor()
-    # c.execute("""
-    #     SELECT a.id, l.lat, l.lon
-    #     FROM appointments a
-    #     JOIN locations l ON a.id = l.appt_id
-    # """)
-    # points = c.fetchall()   # [(appt_id, lat, lon), ...]
-    # conn.close()
-    # clusters = capacity_clusters(points, capacity=6)
-    # conn = sqlite3.connect(DB_PATH)
-    # c = conn.cursor()
-    # c.execute("DELETE FROM clusters;")
-    # for i, cluster in enumerate(clusters, start=1):
-    #     for appt_id, _, _ in cluster:
-    #         c.execute("""
-    #             INSERT INTO clusters (cluster_name, appt_id)
-    #             VALUES (?, ?)
-    #         """, (f"Cluster {i}", appt_id))
-    # conn.commit()
-    # conn.close()
-    # print("* clusters terminés et enregistrés dans clusters")
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        SELECT a.id, l.lat, l.lon
+        FROM appointments a
+        JOIN locations l ON a.id = l.appt_id
+    """)
+    points = c.fetchall()   # [(appt_id, lat, lon), ...]
+    conn.close()
+    clusters = capacity_clusters(points, capacity=6)
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM clusters;")
+    for i, cluster in enumerate(clusters, start=1):
+        for appt_id, _, _ in cluster:
+            c.execute("""
+                INSERT INTO clusters (cluster_name, appt_id)
+                VALUES (?, ?)
+            """, (f"Cluster {i}", appt_id))
+    conn.commit()
+    conn.close()
+    print("* clusters terminés et enregistrés dans clusters")
 
     # Planification TSP -> itineraire
-    # plan_clusters()
+    plan_clusters()
 
     # Génération de la carte interactive avec Folium
     plot_clusters_map_v2()

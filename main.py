@@ -1,6 +1,7 @@
 import sqlite3
 from pathlib import Path
 import requests
+import folium
 from ortools.constraint_solver import routing_enums_pb2, pywrapcp
 from dotenv import load_dotenv
 import os
@@ -291,6 +292,60 @@ def plan_clusters(db_path=DB_PATH):
     conn.close()
     print("TSP résolution terminé")
 
+def plot_clusters_map(db_path=DB_PATH, output_html="clusters_map.html"):
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+
+    # Récupérer le dépôt (on suppose 1 seul pour l’instant)
+    c.execute("SELECT lat, lon FROM depots LIMIT 1")
+    depot_lat, depot_lon = c.fetchone()
+
+    # Récupérer les clusters
+    c.execute("SELECT DISTINCT cluster_id FROM itineraries")
+    cluster_ids = [row[0] for row in c.fetchall()]
+
+    # Créer une carte centrée sur le dépôt
+    m = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
+
+    colors = ["red", "blue", "green", "purple", "orange", "darkred",
+              "lightred", "beige", "darkblue", "darkgreen", "cadetblue",
+              "darkpurple", "white", "pink", "lightblue", "lightgreen",
+              "gray", "black", "lightgray"]
+
+    for i, cluster_id in enumerate(cluster_ids):
+        color = colors[i % len(colors)]
+
+        # Récupérer l’itinéraire du cluster trié par séquence
+        c.execute("""
+            SELECT appt_id, sequence
+            FROM itineraries
+            WHERE cluster_id = ?
+            ORDER BY sequence
+        """, (cluster_id,))
+        itin = c.fetchall()
+
+        coords = []
+        for appt_id, seq in itin:
+            if appt_id is None:  # Dépôt
+                lat, lon = depot_lat, depot_lon
+            else:
+                c.execute("SELECT lat, lon FROM locations WHERE appt_id = ?", (appt_id,))
+                lat, lon = c.fetchone()
+            coords.append((lat, lon))
+
+            # Marqueurs
+            folium.Marker(
+                [lat, lon],
+                popup=f"Cluster {cluster_id}, seq {seq}, appt {appt_id if appt_id else 'DEPOT'}",
+                icon=folium.Icon(color=color, icon="info-sign")
+            ).add_to(m)
+
+        # Tracer le chemin (Polyline)
+        folium.PolyLine(coords, color=color, weight=3, opacity=0.7).add_to(m)
+
+    conn.close()
+    m.save(output_html)
+    print(f"Carte générée : {output_html}")
 
 ##########################################
 
@@ -331,9 +386,8 @@ if __name__ == "__main__":
     conn.close()
     print("* clusters terminés et enregistrés dans clusters")
 
-
     # Planification TSP -> itineraire
     plan_clusters()
 
     # Génération de la carte interactive avec Folium
-    # map_with_folium()
+    plot_clusters_map()

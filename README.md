@@ -1,47 +1,134 @@
-Formulaire client → Stockage → Géocodage → Clustering → Matrice de distances 
-→ Optimisation par jour → Génération planning + Carte
+# 📌 README – Agendix Routing
 
-1. Entrée des données
-Formulaire client (adresse complète, type de RDV, éventuellement durée)
-Stockage (mail → import, ou base de données directe)
-Point de départ (domicile/bureau défini dans la config)
+## 🚀 Présentation
 
-2. Pré-traitement
-Géocodage (conversion "N° rue, ville, CP" → latitude/longitude via API OpenRouteService ou équivalent)
-Nettoyage des données (ex : adresses manquantes, doublons)
-Normalisation du type de RDV (si besoin, pour gérer la durée standard)
+Ce projet permet de **planifier et visualiser des itinéraires optimisés** pour des rendez-vous clients à partir d’une base SQLite.  
+L’application :  
+- Regroupe des rendez-vous en **clusters**.  
+- Calcule des itinéraires optimisés (TSP) à partir du **dépôt**.  
+- Stocke la séquence dans une table `itineraries`.  
+- Génère une **carte interactive Folium** montrant le trajet réel en voiture, cluster par cluster, grâce à l’API **OpenRouteService (ORS)**.  
 
-3. Regroupement géographique
-Clustering spatial (regrouper les RDV proches)
-Méthodes possibles :
-K-Means (nombre de clusters = nb de jours disponibles)
-DBSCAN (groupes naturels selon distance)
-Simple heuristique (découpage par zones : Nancy, Metz, Épinal, etc.)
-Résultat attendu : chaque cluster correspond à une journée de travail.
+---
 
-4. Calcul des trajets
-Matrice de distance/temps :
-Calculer tous les temps de trajet entre :
-Point de départ ↔ RDV
-RDV ↔ RDV
-RDV ↔ retour au départ
-Utiliser OpenRouteService Matrix API.
+## ✨ Fonctionnalités
 
-5. Optimisation intra-cluster
-Pour chaque cluster (jour de RDV) :
-Résoudre un TSP (Traveling Salesman Problem) avec OR-Tools → ordre optimal des RDV.
-Ajouter contraintes horaires :
-Durée fixe du RDV (ex. 1h ou selon type).
-Plage horaire journalière (9h–18h, pause midi).
-Vérifier que le total (trajet + RDV) tient dans la journée.
-Si ça dépasse : déplacer un RDV au cluster suivant.
+- Récupération des rendez-vous par cluster depuis la base.  
+- Optimisation des tournées avec OR-Tools (TSP).  
+- Sauvegarde des itinéraires ordonnés en base (`itineraries`).  
+- Visualisation des trajets routiers :  
+  - Dépôt marqué en début et fin d’itinéraire.  
+  - Marqueurs pour chaque rendez-vous avec popup d’info (cluster, séquence, id).  
+  - Lignes de trajets routiers en **voiture** (ORS Directions).  
+  - **Couleur différente par cluster** pour la lisibilité.  
 
-6. Sortie (planning)
-Tableau :
-Jour 1 → RDV 1 (10h00), RDV 2 (11h30)…
-Jour 2 → …
-Carte interactive :
-Points (RDV) + itinéraire du jour.
-Option : export (Google Calendar, PDF, Excel).
+---
 
-depots : 8 Gr Grande Rue, 55210 Avillers-Sainte-Croix
+## 🛠️ Prérequis
+
+- Python 3.9+  
+- SQLite3  
+- Clé API [OpenRouteService](https://openrouteservice.org/sign-up/)  
+- Librairies Python :  
+  ```bash
+  pip install sqlite3 folium requests ortools openrouteservice
+  ```
+
+---
+
+## 📂 Base de données
+
+La base SQLite doit contenir :  
+
+- **depots**  
+  ```sql
+  CREATE TABLE depots (
+      id INTEGER PRIMARY KEY,
+      lat REAL,
+      lon REAL
+  );
+  ```
+
+- **appointments**  
+  (tes rendez-vous)
+
+- **locations**  
+  (coordonnées liées aux `appointments`)  
+  ```sql
+  CREATE TABLE locations (
+      id INTEGER PRIMARY KEY,
+      appt_id INTEGER,
+      lat REAL,
+      lon REAL
+  );
+  ```
+
+- **clusters**  
+  (groupement de rendez-vous par cluster_name)
+
+- **itineraries**  
+  (résultat du TSP + ordre des RDV)  
+  ```sql
+  CREATE TABLE itineraries (
+      id INTEGER PRIMARY KEY,
+      cluster_id INTEGER,
+      appt_id INTEGER, -- NULL = dépôt
+      sequence INTEGER
+  );
+  ```
+
+---
+
+## ⚙️ Configuration
+
+Dans ton fichier Python :  
+
+```python
+DB_PATH = "chemin/vers/ta_base.sqlite"
+ORS_API_KEY = "TA_CLE_API"
+```
+
+---
+
+## ▶️ Utilisation
+
+### 1. Générer les itinéraires optimisés
+```python
+plan_clusters(DB_PATH)
+```
+👉 Cela remplit la table `itineraries` avec la séquence optimisée pour chaque cluster.
+
+### 2. Générer la carte interactive
+```python
+plot_clusters_map_v2(DB_PATH)
+```
+
+👉 Cela crée un fichier `clusters_map_routes.html` avec :  
+- Les trajets routiers réels en voiture entre dépôt et RDV.  
+- Des couleurs différentes par cluster.  
+- Des marqueurs cliquables.  
+
+---
+
+## 🗺️ Exemple visuel attendu
+
+- **Markers bleus/verts/rouges** → points du cluster.  
+- **Dépôt** visible au départ et à l’arrivée (appt_id = NULL).  
+- **Lignes colorées** reliant les rendez-vous via les routes routières (pas vol d’oiseau).  
+
+---
+
+## 🚧 Limitations actuelles
+
+- L’API ORS a une limite de **50 appels/minute** → le code fait un appel par segment (robuste, mais peut ralentir si beaucoup de RDV).  
+- Multi-dépôts non encore géré.  
+- Couleur aléatoire par cluster (possible de stabiliser avec un mapping `cluster_id → couleur fixe`).  
+
+---
+
+## 📌 Prochaines améliorations possibles
+
+- Export en PDF ou Excel des itinéraires.  
+- Ajout d’une UI (Flask/Django) pour gérer les RDV.  
+- Multi-dépôts et gestion des véhicules.  
+- Gestion offline avec OSRM en local.  

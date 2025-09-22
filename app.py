@@ -1,8 +1,12 @@
 import streamlit as st
-import sqlite3
-import folium
 from streamlit_folium import st_folium
 from datetime import datetime, timedelta
+import sqlite3,folium, requests
+
+from func.geocode import geocode_appointments
+from func.clustering import clustering
+from func.tsr_plan import plan_clusters
+from func.map_gen import plot_clusters_map_v2
 
 import os
 from dotenv import load_dotenv
@@ -10,6 +14,15 @@ load_dotenv(dotenv_path=".secret")
 DB_PATH = os.getenv("DB_PATH")
 ORS_API_KEY = os.getenv("ORS_API_KEY")
 
+if "message" not in st.session_state:
+    st.session_state["message"] = None
+
+if st.session_state["message"]:
+    if st.session_state["message"][1] > 1:
+        st.session_state["message"] = None
+    else:
+        st.session_state["message"] = (st.session_state["message"][0],2)
+        st.success(st.session_state["message"][0])
 
 st.title("📅 Agendix Routing - Agenda & Itinéraires")
 
@@ -61,8 +74,6 @@ if cluster_choice:
         coords.append([lat, lon])
         folium.Marker([lat, lon], popup=f"Seq {seq} - {appt_id or 'DEPOT'}").add_to(m)
 
-    import requests
-
     # Construire coords [lon, lat]
     coords_lonlat = [[lon, lat] for lat, lon in coords]
 
@@ -100,4 +111,28 @@ if cluster_choice:
     for seq, appt, heure in planning:
         st.write(f"{heure} → {appt}")
 
+st.title("🗺️ Optimisation des rendez-vous")
 
+if st.button("Lancer l'optimisation des RDV 🚀"):
+    try:
+        # Étape 1 : conversion adresses -> coordonnées
+        st.info("📍 Géocodage des adresses...")
+        geocode_appointments(DB_PATH, ORS_API_KEY)
+
+        # Étape 2 : clustering
+        st.info("🔗 Regroupement par proximité...")
+        clustering(DB_PATH)
+
+        # Étape 3 : planification TSP
+        st.info("🛣️ Planification des itinéraires...")
+        plan_clusters(DB_PATH, ORS_API_KEY)
+
+        # Étape 4 : génération de la carte
+        st.info("🗺️ Génération de la carte interactive...")
+        plot_clusters_map_v2(DB_PATH, ORS_API_KEY)
+
+        st.session_state["message"]=("✅ Optimisation terminée ! La carte a été générée.",1)
+        st.rerun()
+    
+    except Exception as e:
+        st.error(f"❌ Une erreur est survenue : {e}")

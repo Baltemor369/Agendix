@@ -145,5 +145,5 @@ if depots:
 
     if st.button("Supprimer"):
         delete_depot(depot_id_to_delete)
-        st.session_state["message"]=("❌ Dépôt '{nom_a_supprimer}' supprimé.",1)
+        st.session_state["message"]=(f"❌ Dépôt '{nom_a_supprimer}' supprimé.",1)
         st.rerun()

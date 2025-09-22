@@ -1,8 +1,6 @@
 # sensitive data
 .secret
-config.py
 *.db
-*.html
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

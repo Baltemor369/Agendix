@@ -1,140 +1,121 @@
 import streamlit as st
-from streamlit_folium import st_folium
-from datetime import datetime, timedelta
-import sqlite3,folium, requests
+import sqlite3, os
+from dotenv import load_dotenv
+# from datetime import datetime, timedelta
 
+# --- Imports internes ---
 from func.geocode import geocode_appointments
 from func.clustering import clustering
 from func.tsr_plan import plan_clusters
-from func.map_gen import plot_clusters_map_v2
+# from func.map_gen import plot_clusters_map_v2  # tu peux commenter si inutile
 
-import os
-from dotenv import load_dotenv
+# --- Config ---
 load_dotenv(dotenv_path=".secret")
 DB_PATH = os.getenv("DB_PATH")
 ORS_API_KEY = os.getenv("ORS_API_KEY")
 
-if "message" not in st.session_state:
-    st.session_state["message"] = None
+st.title("📅 Agendix Routing - Optimisation des tournées")
 
-if st.session_state["message"]:
-    if st.session_state["message"][1] > 1:
-        st.session_state["message"] = None
-    else:
-        st.session_state["message"] = (st.session_state["message"][0],2)
-        st.success(st.session_state["message"][0])
-
-st.title("📅 Agendix Routing - Agenda & Itinéraires")
-
-# Connexion DB
+# --- Connexion DB ---
 conn = sqlite3.connect(DB_PATH)
 c = conn.cursor()
 
-# Choisir cluster
-c.execute("""
-    SELECT DISTINCT i.cluster_id, c.cluster_name
-    FROM itineraries i
-    JOIN clusters c ON i.cluster_id = c.id
-""")
-clusters = c.fetchall()
+# --------------------------------------------------
+# 1. Sélection du voyageur (dépôt)
+# --------------------------------------------------
+st.subheader("👤 Choix du Voyageur")
+c.execute("SELECT id, nom, ville FROM depots")
+depots = c.fetchall()
 
-# Afficher les noms dans le selectbox
-cluster_choice = st.selectbox(
-    "Choisir un cluster :",
-    options=[name for _, name in clusters]
+if not depots:
+    st.warning("⚠️ Aucun dépôt trouvé dans la base. Veuillez en créer un dans la page Dépôts.")
+    st.stop()
+
+traveler_choice = st.selectbox(
+    "Sélectionnez le voyageur :",
+    options=[f"{nom} ({ville})" for _, nom, ville in depots]
 )
+depot_id = depots[[f"{nom} ({ville})" for _, nom, ville in depots].index(traveler_choice)][0]
 
-# Retrouver l'id correspondant
-if cluster_choice:
-    cluster_id = next(cid for cid, name in clusters if name == cluster_choice)
-
-
-    # Récupérer itinéraire
-    c.execute("""
-        SELECT appt_id, sequence
-        FROM itineraries
-        WHERE cluster_id = ?
-        ORDER BY sequence
-    """, (cluster_id,))
-    itin = c.fetchall()
-
-    # Récupérer dépôt
-    c.execute("SELECT lat, lon FROM depots LIMIT 1")
-    depot_lat, depot_lon = c.fetchone()
-
-    ###########################
-    # Construire carte
-    m = folium.Map(location=[depot_lat, depot_lon], zoom_start=10)
-    coords = []
-    for appt_id, seq in itin:
-        if appt_id is None:
-            lat, lon = depot_lat, depot_lon
-        else:
-            c.execute("SELECT lat, lon FROM locations WHERE appt_id = ?", (appt_id,))
-            lat, lon = c.fetchone()
-        coords.append([lat, lon])
-        folium.Marker([lat, lon], popup=f"Seq {seq} - {appt_id or 'DEPOT'}").add_to(m)
-
-    # Construire coords [lon, lat]
-    coords_lonlat = [[lon, lat] for lat, lon in coords]
-
-    # Appeler ORS pour l'itinéraire routier
-    ors_url = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
-    headers = {"Authorization": ORS_API_KEY, "Content-Type": "application/json"}
-    body = {"coordinates": coords_lonlat}
-
-    resp = requests.post(ors_url, json=body, headers=headers)
-
-    if resp.status_code == 200:
-        features = resp.json()["features"]
-        if features:
-            geometry = features[0]["geometry"]["coordinates"]  # [lon, lat]
-            route = [(lat, lon) for lon, lat in geometry]      # conversion [lat, lon]
-            folium.PolyLine(route, color="blue", weight=3, opacity=0.7).add_to(m)
-        else:
-            st.warning(f"Aucune route trouvée pour le cluster {cluster_choice}")
-    else:
-        st.error(f"Erreur ORS: {resp.text}")
-
-    # st_folium(m, width=700, height=500)
-    ######################################
-
-    # Construire planning temporel (simplifié)
-    start_time = st.time_input("Heure de début journée", value=datetime.strptime("09:00", "%H:%M").time())
-    rdv_duration = st.number_input("Durée d'un RDV (minutes)", value=60)
-
-    current_time = datetime.combine(datetime.today(), start_time)
-    planning = []
-    for i, (appt_id, seq) in enumerate(itin):
-        planning.append((seq, appt_id or "Maison", current_time.strftime("%H:%M")))
-        current_time += timedelta(minutes=rdv_duration)
-
-    st.subheader("🕒 Planning du cluster")
-    for seq, appt, heure in planning:
-        st.write(f"{heure} → {appt}")
-
-st.title("🗺️ Optimisation des rendez-vous")
-
-if st.button("Lancer l'optimisation des RDV 🚀"):
+# --------------------------------------------------
+# 2. Bouton pour lancer l’optimisation
+# --------------------------------------------------
+st.subheader("⚙️ Optimisation")
+if st.button("🚀 Lancer l'optimisation des RDV"):
     try:
-        # Étape 1 : conversion adresses -> coordonnées
         st.info("📍 Géocodage des adresses...")
         geocode_appointments(DB_PATH, ORS_API_KEY)
 
-        # Étape 2 : clustering
         st.info("🔗 Regroupement par proximité...")
         clustering(DB_PATH)
 
-        # Étape 3 : planification TSP
-        st.info("🛣️ Planification des itinéraires...")
+        st.info("🛣️ Ordonner les itinéraires...")
         plan_clusters(DB_PATH, ORS_API_KEY)
 
-        # Étape 4 : génération de la carte
-        st.info("🗺️ Génération de la carte interactive...")
-        plot_clusters_map_v2(DB_PATH, ORS_API_KEY)
-
-        st.session_state["message"]=("✅ Optimisation terminée ! La carte a été générée.",1)
+        st.success("✅ Optimisation terminée !")
+        st.session_state["optim_done"] = True
         st.rerun()
-    
+
     except Exception as e:
         st.error(f"❌ Une erreur est survenue : {e}")
+
+# --------------------------------------------------
+# 3. Visualiser les clusters & itinéraires
+# --------------------------------------------------
+if "optim_done" in st.session_state:
+    st.subheader("📊 Résultats des clusters")
+
+    # Charger clusters disponibles
+    c.execute("""
+        SELECT DISTINCT i.cluster_id, c.cluster_name
+        FROM itineraries i
+        JOIN clusters c ON i.cluster_id = c.id
+    """)
+    clusters = c.fetchall()
+
+    if clusters:
+        cluster_choice = st.selectbox(
+            "Choisir un cluster à afficher :",
+            options=[name for _, name in clusters]
+        )
+        cluster_id = next(cid for cid, name in clusters if name == cluster_choice)
+
+        # Récupérer itinéraire (séquence ordonnée)
+        c.execute("""
+            SELECT appt_id, sequence, arrive_time, depart_time, travel_time_prev, distance_prev
+            FROM itineraries
+            WHERE cluster_id = ?
+            ORDER BY sequence
+        """, (cluster_id,))
+        itin = c.fetchall()
+
+        st.subheader("🕒 Planning du cluster")
+
+        # Récupération de l'itinéraire complet
+        c.execute("""
+            SELECT appt_id, sequence, depart_time, arrive_time, duration, travel_time_prev, distance_prev
+            FROM itineraries
+            WHERE cluster_id = ?
+            ORDER BY sequence
+        """, (cluster_id,))
+        itin = c.fetchall()
+
+        # On parcourt les trajets entre chaque point
+        for i in range(1, len(itin)):
+            prev_appt_id, _, _, prev_depart, _, _ = itin[i-1]
+            appt_id, seq, arrive, depart, ttime, dist = itin[i]
+
+            # Label des points (RDV ou Dépôt)
+            prev_label = f"RDV {prev_appt_id}" if prev_appt_id else traveler_choice
+            curr_label = f"RDV {appt_id}" if appt_id else traveler_choice
+
+            st.markdown(
+                f"**{seq}.** {prev_label} → {curr_label}  "
+                f"| Départ : {prev_depart} | Arrivée : {arrive}  "
+                f"| 🚗 {ttime} min / {dist:.1f} km"
+            )
+
+    else:
+        st.info("ℹ️ Aucun cluster n’a encore été généré.")
+
+conn.close()

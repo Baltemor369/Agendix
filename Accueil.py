@@ -62,6 +62,7 @@ if cluster_choice:
     c.execute("SELECT lat, lon FROM depots LIMIT 1")
     depot_lat, depot_lon = c.fetchone()
 
+    ###########################
     # Construire carte
     m = folium.Map(location=[depot_lat, depot_lon], zoom_start=10)
     coords = []
@@ -95,7 +96,8 @@ if cluster_choice:
     else:
         st.error(f"Erreur ORS: {resp.text}")
 
-    st_folium(m, width=700, height=500)
+    # st_folium(m, width=700, height=500)
+    ######################################
 
     # Construire planning temporel (simplifié)
     start_time = st.time_input("Heure de début journée", value=datetime.strptime("09:00", "%H:%M").time())

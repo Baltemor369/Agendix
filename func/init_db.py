@@ -37,7 +37,7 @@ def init_db(db_path):
         FOREIGN KEY(appt_id) REFERENCES appointments(id) ON DELETE CASCADE
     );
                     
-    CREATE TABLE depots (
+    CREATE TABLE travelers (
         id    INTEGER PRIMARY KEY AUTOINCREMENT,
         nom   TEXT    NOT NULL,
         num   TEXT,

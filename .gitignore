@@ -3,6 +3,8 @@
 *.db
 config.py
 *.html
+TODO.mk
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

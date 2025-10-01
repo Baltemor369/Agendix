@@ -24,6 +24,7 @@ def init_db(db_path):
     CREATE TABLE locations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         appt_id INTEGER NOT NULL,
+        address TEXT,
         lat REAL,
         lon REAL,
         FOREIGN KEY(appt_id) REFERENCES appointments(id) ON DELETE CASCADE

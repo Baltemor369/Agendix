@@ -47,14 +47,14 @@ if st.button("🚀 Lancer l'optimisation des RDV"):
         geocode_appointments(DB_PATH, ORS_API_KEY)
 
         st.info("🔗 Regroupement par proximité...")
-        clustering(DB_PATH)
+        clustering(DB_PATH, capacity=6, max_distance_km=30, verbose=True)
 
-        st.info("🛣️ Ordonner les itinéraires...")
-        plan_clusters(DB_PATH, ORS_API_KEY)
+        # st.info("🛣️ Ordonner les itinéraires...")
+        # plan_clusters(DB_PATH, ORS_API_KEY)
 
         st.success("✅ Optimisation terminée !")
-        st.session_state["optim_done"] = True
-        st.rerun()
+        # st.session_state["optim_done"] = True
+        # st.rerun()
 
     except Exception as e:
         st.error(f"❌ Une erreur est survenue : {e}")

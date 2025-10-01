@@ -1,49 +1,75 @@
 import sqlite3
 from geopy.distance import geodesic
 
-def capacity_clusters(points, capacity=6, max_distance_km=30):
-    remaining = points.copy()
-    clusters = []
-
-    while remaining:
-        seed = remaining.pop(0)
-        cluster = [seed]
-
-        # Points restants triés par distance au seed
-        sorted_points = sorted(remaining, key=lambda p: geodesic((seed[1], seed[2]), (p[1], p[2])).km)
-
-        for candidate in sorted_points:
-            if len(cluster) >= capacity:
-                break
-            distance = geodesic((seed[1], seed[2]), (candidate[1], candidate[2])).km
-            if distance <= max_distance_km:
-                cluster.append(candidate)
-                remaining.remove(candidate)
-
-        clusters.append(cluster)
-
-    return clusters
-
-def clustering(db_path, capacity=6):
+def clustering(db_path, capacity=6, max_distance_km=30, verbose=True):
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
+
+    # Récupérer le dépôt
+    c.execute("SELECT lat, lon FROM depots LIMIT 1")
+    depot = c.fetchone()
+    if not depot:
+        print("[X] Aucun dépôt trouvé dans la table depots")
+        conn.close()
+        return
+    depot_lat, depot_lon = depot
+
+    # Récupérer les rendez-vous
     c.execute("""
         SELECT a.id, l.lat, l.lon
         FROM appointments a
         JOIN locations l ON a.id = l.appt_id
     """)
-    points = c.fetchall()   # [(appt_id, lat, lon), ...]
-    conn.close()
-    clusters = capacity_clusters(points, capacity)
-    conn = sqlite3.connect(db_path)
-    c = conn.cursor()
+    points = c.fetchall()  # [(appt_id, lat, lon), ...]
+
+    if not points:
+        print("[X] Aucun rendez-vous trouvé")
+        conn.close()
+        return
+
+    # Calculer distance au dépôt
+    points_with_dist = [
+        (appt_id, lat, lon, geodesic((depot_lat, depot_lon), (lat, lon)).km)
+        for appt_id, lat, lon in points
+    ]
+
+    # Trier par distance au dépôt
+    points_with_dist.sort(key=lambda x: x[3])
+
+    # Supprimer anciens clusters
     c.execute("DELETE FROM clusters;")
-    for i, cluster in enumerate(clusters, start=1):
-        for appt_id, _, _ in cluster:
+
+     # Créer les clusters sous forme de dictionnaire
+    clusters = {}
+    current_cluster = []
+    current_cluster_name = 1
+
+    for appt_id, lat, lon, dist in points_with_dist:
+        # Si RDV trop loin du dépôt ou cluster plein, on démarre un nouveau cluster
+        if len(current_cluster) >= capacity:
+            if current_cluster:
+                clusters[f"Jour {current_cluster_name}"] = current_cluster
+                current_cluster_name += 1
+                current_cluster = []
+
+        current_cluster.append((appt_id, lat, lon, dist))
+
+    # Ajouter le dernier cluster
+    if current_cluster:
+        clusters[f"Jour {current_cluster_name}"] = current_cluster
+
+    # Sauvegarde en DB et affichage
+    for cluster_name, cluster_points in clusters.items():
+        if verbose:
+            print(f"\n{cluster_name} → {len(cluster_points)} RDV(s)")
+            for appt_id, lat, lon, dist in cluster_points:
+                print(f"  RDV {appt_id} | {dist:.2f} km du dépôt | coords: ({lat:.5f}, {lon:.5f})")
+        for appt_id, lat, lon, dist in cluster_points:
             c.execute("""
                 INSERT INTO clusters (cluster_name, appt_id)
                 VALUES (?, ?)
-            """, (f"Cluster {i}", appt_id))
+            """, (cluster_name, appt_id))
+
     conn.commit()
     conn.close()
-    print("* clusters terminés et enregistrés dans clusters")
+    print(f"* Clustering terminé → {len(clusters)} paquets créés")

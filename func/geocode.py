@@ -25,34 +25,55 @@ def geocode_address(address, API_key, conn):
 
 
 def geocode_appointments(db_path, api_key):
-    print("* Convertion des adresses en geocode (lat,lon)")
+    print("* Mise à jour des géocodes (lat, lon)")
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
-    # RDV sans location
-    c.execute("""
-        SELECT a.id, a.num, a.rue, a.ville, a.zip
-        FROM appointments a
-        LEFT JOIN locations l ON a.id = l.appt_id
-        WHERE l.id IS NULL
-    """)
+    # Ajouter la colonne address si elle n’existe pas
+    try:
+        c.execute("ALTER TABLE locations ADD COLUMN address TEXT")
+    except sqlite3.OperationalError:
+        pass  # colonne existe déjà
+
+    # Récupérer tous les RDV
+    c.execute("SELECT id, num, rue, ville, zip FROM appointments")
     appointments = c.fetchall()
 
-    done = 0
+    done, updated = 0, 0
     for appt_id, num, rue, ville, zip_code in appointments:
-        full_address = f"{num} {rue}, {ville} {zip_code}"        
-        lat, lon = geocode_address(full_address, api_key, conn)
+        full_address = f"{num} {rue}, {ville} {zip_code}"
 
-        if lat and lon:
-            c.execute("""
-                INSERT INTO locations (appt_id, address, lat, lon)
-                VALUES (?, ?, ?, ?)
-            """, (appt_id, full_address, lat, lon))
-            print(f"- {full_address} → {lat}, {lon}")
-            done += 1
+        # Vérifier si déjà en base
+        c.execute("SELECT address FROM locations WHERE appt_id = ?", (appt_id,))
+        row = c.fetchone()
+
+        if row:
+            # Si l'adresse a changé → mettre à jour
+            if row[0] != full_address:
+                lat, lon = geocode_address(full_address, api_key, conn)
+                if lat and lon:
+                    c.execute("""
+                        UPDATE locations 
+                        SET address = ?, lat = ?, lon = ?
+                        WHERE appt_id = ?
+                    """, (full_address, lat, lon, appt_id))
+                    print(f"~ Adresse mise à jour : {full_address} → {lat}, {lon}")
+                    updated += 1
+                else:
+                    print(f"[X] Mise à jour échouée pour {full_address}")
         else:
-            print(f"[X] Géocodage échoué pour {full_address}")
+            # Sinon → nouvel enregistrement
+            lat, lon = geocode_address(full_address, api_key, conn)
+            if lat and lon:
+                c.execute("""
+                    INSERT INTO locations (appt_id, address, lat, lon)
+                    VALUES (?, ?, ?, ?)
+                """, (appt_id, full_address, lat, lon))
+                print(f"+ Nouvelle adresse : {full_address} → {lat}, {lon}")
+                done += 1
+            else:
+                print(f"[X] Géocodage échoué pour {full_address}")
 
     conn.commit()
     conn.close()
-    print(f"* {done}/{len(appointments)} Géocodage ORS terminé et stocké dans 'locations'")
+    print(f"* {done} nouvelles adresses ajoutées, {updated} mises à jour.")

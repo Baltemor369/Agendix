@@ -52,9 +52,9 @@ def insert_data_test(db_path=DB_PATH, data=SAMPLES):
 
 def insert_depot_test(db_path=DB_PATH):
     full = f"{DEPOT["num"]} {DEPOT["rue"]}, {DEPOT["ville"]} {DEPOT["zip_code"]}"
-    lat, lon = geocode_address(full, ORS_API_KEY)  # ta fonction existante
-
     conn = sqlite3.connect(db_path)
+    lat, lon = geocode_address(full, ORS_API_KEY, conn)  # ta fonction existante
+
     c = conn.cursor()
     c.execute("""
       INSERT INTO depots (nom, num, rue, ville, zip, lat, lon)

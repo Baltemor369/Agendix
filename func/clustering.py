@@ -43,16 +43,19 @@ def clustering(db_path, capacity=6, max_distance_km=30, verbose=True):
     clusters = {}
     current_cluster = []
     current_cluster_name = 1
+    prev_point = None
 
     for appt_id, lat, lon, dist in points_with_dist:
-        # Si RDV trop loin du dépôt ou cluster plein, on démarre un nouveau cluster
-        if len(current_cluster) >= capacity:
-            if current_cluster:
-                clusters[f"Jour {current_cluster_name}"] = current_cluster
-                current_cluster_name += 1
-                current_cluster = []
+        if prev_point is not None:
+            dist_to_prev = geodesic((prev_point[1], prev_point[2]), (lat, lon)).km
+            if dist_to_prev > max_distance_km or len(current_cluster) >= capacity:
+                if current_cluster:
+                    clusters[f"Jour {current_cluster_name}"] = current_cluster
+                    current_cluster_name += 1
+                    current_cluster = []
 
         current_cluster.append((appt_id, lat, lon, dist))
+        prev_point = (appt_id, lat, lon, dist)
 
     # Ajouter le dernier cluster
     if current_cluster:

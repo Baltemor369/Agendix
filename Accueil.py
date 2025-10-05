@@ -1,14 +1,13 @@
 import streamlit as st
 import sqlite3, os
 from dotenv import load_dotenv
-# from datetime import datetime, timedelta
 
 # --- Imports internes ---
-from func.geocode import geocode_appointments
-from func.clustering import clustering
-from func.tsr_plan import TSP
-from func.use_tools import fmt_time
-# from func.map_gen import plot_clusters_map_v2  # tu peux commenter si inutile
+from mods.geocode import geocode_appointments
+from mods.clustering import clustering
+from mods.tsr_plan import TSP
+from mods.models import Client, Appointment, Travel
+
 
 # --- Config ---
 load_dotenv(dotenv_path=".secret")
@@ -19,6 +18,7 @@ st.title("📅 Agendix Routing - Optimisation des tournées")
 
 # --- Connexion DB ---
 conn = sqlite3.connect(DB_PATH)
+conn.row_factory = sqlite3.Row  # pour ORM
 c = conn.cursor()
 
 # --------------------------------------------------
@@ -43,6 +43,7 @@ depot_id = depots[[f"{nom} ({ville})" for _, nom, ville in depots].index(travele
 # --------------------------------------------------
 st.subheader("⚙️ Optimisation")
 if st.button("🚀 Lancer l'optimisation des RDV"):
+    print("\n##############\n")
     try:
         st.info("📍 Géocodage des adresses...")
         geocode_appointments(DB_PATH, ORS_API_KEY)
@@ -62,8 +63,6 @@ if st.button("🚀 Lancer l'optimisation des RDV"):
 # --------------------------------------------------
 # 3. Visualiser les clusters & itinéraires
 # --------------------------------------------------
-conn = sqlite3.connect(DB_PATH)
-c = conn.cursor()
 c.execute("SELECT COUNT(*) FROM itineraries")
 count_itin = c.fetchone()[0]
 
@@ -85,71 +84,86 @@ if count_itin > 0:
         )
         cluster_id = next(cid for cid, name in clusters if name == cluster_choice)
 
-        # Récupérer itinéraire (séquence ordonnée)
+        # Récupération itinéraire + RDV associés
         c.execute("""
-            SELECT appt_id, sequence, arrive_time, depart_time, travel_time_prev, distance_prev
-            FROM itineraries
-            WHERE cluster_id = ?
-            ORDER BY sequence
+            SELECT i.appt_id, i.sequence, i.depart_time, i.arrive_time,
+                   i.duration_visit, i.travel_time_prev, i.distance_prev,
+                   a.client_id, a.type, a.duration,
+                   a.num, a.rue, a.ville, a.zip,
+                   cl.nom as client_nom, cl.address as client_address
+            FROM itineraries i
+            LEFT JOIN appointments a ON i.appt_id = a.id
+            LEFT JOIN clients cl ON a.client_id = cl.id
+            WHERE i.cluster_id = ?
+            ORDER BY i.sequence
         """, (cluster_id,))
-        itin = c.fetchall()
+        rows = c.fetchall()
 
+        travels: list[Travel] = []
+        prev_appt: Appointment | None = None
+
+        for row in rows:
+            appt_id = row["appt_id"]
+
+            appt = None
+            if appt_id:  # construire l’objet Appointment + Client
+                client = Client(
+                    id=row["client_id"],
+                    nom=row["client_nom"],
+                    address=row["client_address"]
+                )
+                adresse = f"{row['num']} {row['rue']}, {row['ville']} {row['zip']}"
+                appt = Appointment(
+                    id=appt_id,
+                    client_id=client.id,
+                    num=row["num"], rue=row["rue"], ville=row["ville"], zip=row["zip"],
+                    type=row["type"], duration=row["duration"]
+                )
+                appt.client = client  # lien objet, non DB
+
+            travel = Travel(
+                origin_appt_id=prev_appt.id if prev_appt else None,
+                dest_appt_id=appt.id if appt else None,
+                cluster_id=cluster_id,
+                depart_time=row["depart_time"],
+                arrive_time=row["arrive_time"],
+                travel_time=row["travel_time_prev"],
+                distance=row["distance_prev"]
+            )
+            # enrichissement pour l'affichage
+            travel.seq = row["sequence"]
+            travel.duration_visit = row["duration_visit"]
+            travel.origin = prev_appt
+            travel.destination = appt
+
+            travels.append(travel)
+            prev_appt = appt
+
+        # --- Affichage ---
         st.subheader("🕒 Planning du cluster")
 
-        # Récupération de l'itinéraire complet
-        c.execute("""
-            SELECT appt_id, sequence, depart_time, arrive_time, duration_visit, travel_time_prev, distance_prev
-            FROM itineraries
-            WHERE cluster_id = ?
-            ORDER BY sequence
-        """, (cluster_id,))
-        itin = c.fetchall()
-
-        # On parcourt les trajets entre chaque point
-        for i in range(1, len(itin)):
-            prev_appt_id, _, _, prev_depart, _, _, _ = itin[i-1]
-            appt_id, seq, arrive, depart, duration, ttime, dist = itin[i]
-
-            # Label des points (RDV ou Dépôt)
-            prev_label = f"RDV {prev_appt_id}" if prev_appt_id else traveler_choice
-            curr_label = f"RDV {appt_id}" if appt_id else traveler_choice
+        for travel in travels:
+            prev_label = f"RDV {travel.origin.id}" if travel.origin else traveler_choice
+            curr_label = f"RDV {travel.destination.id}" if travel.destination else traveler_choice
 
             st.markdown(
-                f"**{seq}.** {prev_label} → {curr_label}  "
-                f"\nDépart : {fmt_time(prev_depart)} | Arrivée : {fmt_time(arrive)}  "
-                f"| 🚗 {ttime} min / {dist:.1f} km"
+                f"**{travel.seq}.** {prev_label} → {curr_label}  "
+                f"\nDépart : {travel.depart_time} | Arrivée : {travel.arrive_time}  "
+                f"| 🚗 {travel.travel_time} min / {travel.distance:.1f} km"
             )
 
-            # afficher les informations du rdv qui suit le trajet
-            # recuperer les info grace à l'id
-            # afficher le type de rdv et sa durer
-            # afficher le nom du client l'adresse et la durer
-
-            # ---- Infos RDV ----
-            if appt_id:  # si ce n'est pas le dépôt
-                c.execute("""
-                    SELECT client, num, rue, ville, zip, type
-                    FROM appointments
-                    WHERE id = ?
-                """, (appt_id,))
-                rdv = c.fetchone()
-
-                if rdv:
-                    client, num, rue, ville, zip_code, type_ = rdv
-                    adresse = f"{num} {rue}, {ville} {zip_code}"
-                    st.markdown("---")
-                    st.markdown(
-                        f"🧑 Client : **{client}**  \n"
-                        f"📍 Adresse : {adresse}  \n"
-                        f"🏷️ Type : {type_ or 'N/A'}  \n"
-                        f"⏱️ Durée prévue : {duration} min"
-                    )
-                    st.markdown("---")
+            if travel.destination:
+                appt = travel.destination
+                st.markdown("---")
+                st.markdown(
+                    f"👤 Client : **{appt.client.nom}**  \n"
+                    f"📍 Adresse : {appt.num} {appt.rue}, {appt.ville} {appt.zip}  \n"
+                    f"🏷️ Type : {appt.type or 'N/A'}  \n"
+                    f"⏱️ Durée prévue : {appt.duration} min"
+                )
+                st.markdown("---")
 
     else:
         st.info("ℹ️ Aucun cluster n'a encore été généré.")
 
 conn.close()
-
-# voir pour construire le planning complet trajet -> rdv -> trajet -> ... 
-# une ligne = une etape dans la table => "planning"

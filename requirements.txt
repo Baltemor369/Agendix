@@ -8,3 +8,4 @@ python_dotenv==1.1.1
 ics==0.7.2
 streamlit==1.49.1
 streamlit-folium==0.25.1
+streamlit-calendar==1.4.0

@@ -77,3 +77,31 @@ def geocode_appointments(db_path, api_key):
     conn.commit()
     conn.close()
     print(f"* {done} nouvelles adresses ajoutées, {updated} mises à jour.")
+
+def geocode_depots(db_path, api_key):
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    c.execute("SELECT id, nom, num, rue, ville, zip, lat, lon FROM depots")
+    rows = c.fetchall()
+
+    for row in rows:
+        depot_id, nom, num, rue, ville, zip, lat, lon = row
+
+        # Si déjà géocodé, on passe
+        if lat and lon:
+            continue
+
+        # Construire adresse complète
+        address = f"{num or ''} {rue or ''}, {zip or ''} {ville or ''}".strip()
+        if not address:
+            print(f"[!] Dépôt {nom} sans adresse complète, ignoré.")
+            continue
+
+        lat, lon = geocode_address(address, api_key, conn)
+
+        try:
+            c.execute("UPDATE depots SET lat = ?, lon = ? WHERE id = ?", (lat, lon, depot_id))
+            conn.commit()
+            print(f"[OK] Dépôt '{nom}' géocodé : {lat:.5f}, {lon:.5f}")
+        except (KeyError, IndexError):
+            print(f"[X] Impossible de géocoder le dépôt '{nom}'")

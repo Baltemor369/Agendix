@@ -3,10 +3,11 @@ import sqlite3, os
 from dotenv import load_dotenv
 
 # --- Imports internes ---
-from mods.geocode import geocode_appointments
+from mods.geocode import geocode_appointments, geocode_depots
 from mods.clustering import clustering
 from mods.tsr_plan import TSP
 from mods.models import Client, Appointment, Travel
+from mods.use_tools import fmt_time_iso
 
 
 # --- Config ---
@@ -47,6 +48,9 @@ if st.button("🚀 Lancer l'optimisation des RDV"):
     try:
         st.info("📍 Géocodage des adresses...")
         geocode_appointments(DB_PATH, ORS_API_KEY)
+
+        st.info("📍 Géocodage des dépôts...")
+        geocode_depots(DB_PATH, ORS_API_KEY)
 
         st.info("🔗 Regroupement par proximité...")
         clustering(DB_PATH, capacity=6, max_distance_km=30, verbose=True)
@@ -142,15 +146,16 @@ if count_itin > 0:
         # --- Affichage ---
         st.subheader("🕒 Planning du cluster")
 
-        for travel in travels:
+        for travel in travels[1:]:
             prev_label = f"RDV {travel.origin.id}" if travel.origin else traveler_choice
             curr_label = f"RDV {travel.destination.id}" if travel.destination else traveler_choice
 
             st.markdown(
-                f"**{travel.seq}.** {prev_label} → {curr_label}  "
-                f"\nDépart : {travel.depart_time} | Arrivée : {travel.arrive_time}  "
-                f"| 🚗 {travel.travel_time} min / {travel.distance:.1f} km"
+                f"**{travel.seq}.** {prev_label} → {curr_label}  \n"
+                f"🕒 Départ : {fmt_time_iso(travel.depart_time)}  •  Arrivée : {fmt_time_iso(travel.arrive_time)}  \n"
+                f"🚗 {travel.travel_time} min  |  📏 {travel.distance:.1f} km"
             )
+
 
             if travel.destination:
                 appt = travel.destination
